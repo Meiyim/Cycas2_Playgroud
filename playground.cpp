@@ -31,7 +31,7 @@ int main(int argc,char **args) try
   if(dataGroup->comRank == 0){
 	  root.rootuBuffer = new double[m*n];
 	  root.read();
-	  root.partition(n);
+	  root.partition(n);//n must be the number of processes
 	  getchar();
   }
   /***********************************************************************/
@@ -46,16 +46,24 @@ int main(int argc,char **args) try
   dataGroup->fetchDataFrom(root);
   getchar();
   MPI_Barrier(PETSC_COMM_WORLD);
-  if(dataGroup->comRank == 3){
-	  printf("examin the data in process3\n");
+  /*
+  if(dataGroup->comRank == 0){
+	  printf("examin the data in process0\n");
 	  for(int i=0;i!=dataGroup->nLocal;++i){
 		  printf("element");
 		  for(int j=0;j!=MAX_ROW;++j)
 		  	printf(" %f at %d, ",dataGroup->Avals[i][j],dataGroup->Aposi[i][j]);
 		  printf("\n");
 	  }
-	  
   }
+  */
+
+  dataGroup->buildMatrix();
+  printf("process: %d waiting at barrier in main\n",dataGroup->comRank);
+  getchar();
+  MPI_Barrier(PETSC_COMM_WORLD);
+  root.clean(); //free space of root obj
+
   /*-------------------------------
    *	all processors works from here 
    *-------------------------------*/
@@ -90,7 +98,9 @@ int main(int argc,char **args) try
    * view the vector 
    *-------------------------------*/
   //ierr = VecView(dataGroup->u,PETSC_VIEWER_DRAW_WORLD);CHKERRQ(ierr); //this vector is too big to view!
-  //ierr = VecView(u,PETSC_VIEWER_DRAW_WORLD);CHKERRQ(ierr);
+  
+  ierr = MatView(dataGroup->Au,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
+  
 
   
   /*--------------------------------

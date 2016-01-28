@@ -2,7 +2,7 @@
 using namespace std;
 
 
-void DataGroup::init(RootProcess& root){ //collcetive
+int DataGroup::init(RootProcess& root){ //collcetive
 	printf("process %d initing\n",comRank);
 	nProcess = comSize;
 	if(comRank==root.rank) // in root processes
@@ -30,9 +30,9 @@ void DataGroup::init(RootProcess& root){ //collcetive
 	getchar();
 	ierr = VecCreateMPI(comm,nLocal,nGlobal,&u);CHKERRQ(ierr); //init PETSC vec
 	ierr = MatCreate(comm,&Au);PCHECK(ierr);CHKERRQ(ierr);     //init PETSC mat
-	ierr = MatSetSizes(Au,nLocal,nLocal,nGlobal,nGlobal):CHKERRQ(ierr);
+	ierr = MatSetSizes(Au,nLocal,nLocal,nGlobal,nGlobal);CHKERRQ(ierr);
 	ierr = MatSetType(Au,MATAIJ);CHKERRQ(ierr);
-	ierr = MatMPIAIJSetPreallocation(A,MAX_ROW,NULL,MAX_ROW,NULL);CHKERRQ(ierr);	
+	ierr = MatMPIAIJSetPreallocation(Au,MAX_ROW,NULL,MAX_ROW,NULL);CHKERRQ(ierr);	
 
 
 
@@ -46,9 +46,10 @@ void DataGroup::init(RootProcess& root){ //collcetive
 		Avals[i] = &Avals[0][i*MAX_ROW];
 		Aposi[i] = &Aposi[0][i*MAX_ROW];
 	}
+	return 0;
 }
 
-void DataGroup::fetchDataFrom(RootProcess& root){ //collective
+int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	int sourceRank=root.rank;
 
 	int destCount=0;
@@ -64,7 +65,7 @@ void DataGroup::fetchDataFrom(RootProcess& root){ //collective
 		offsets[i] = offsets[i-1] + sourceCount[i];
 	}
 	destCount = nLocal;
-	mpiErr = VecGetArray(u,&localArray);PCHECK(mpiErr) //fetch raw pointer of PetscVector;
+	ierr = VecGetArray(u,&localArray);CHKERRQ(mpiErr); //fetch raw pointer of PetscVector;
 
 	mpiErr = MPI_Scatterv(root.rootuBuffer,sourceCount,offsets,MPI_DOUBLE,
 			localArray,destCount,MPI_DOUBLE,sourceRank,comm); CHECK(mpiErr)
@@ -73,7 +74,7 @@ void DataGroup::fetchDataFrom(RootProcess& root){ //collective
 		printf("array for process %d: %f\n",comRank,localArray[i]);
 	*/
 
-	mpiErr = VecRestoreArray(u,&localArray);PCHECK(mpiErr)
+	ierr = VecRestoreArray(u,&localArray);CHKERRQ(mpiErr);
 
  	//*************************fetching Matrix A***************************	
 	
@@ -92,16 +93,54 @@ void DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	mpiErr = MPI_Scatterv(root.rootAPosiBuffer,sourceCount,offsets,MPI_INT,
 			localArray2,destCount,MPI_INT,sourceRank,comm); CHECK(mpiErr)
 	
-	
+	if(comRank==root.rank){ //scatterv wont scatter to self! need to explicitly copy to self :(
+		for(int i=0;i!=nLocal;++i)
+			for(int j=0;j!=MAX_ROW;++j){
+			Aposi[i][j] = root.rootAPosiBuffer[i*MAX_ROW+j]; // root range from 0~nLocal
+			Avals[i][j] = root.rootABuffer[i*MAX_ROW+j];
+		}
+	}	
 
 
 	delete offsets;
 	delete sourceCount;
 	printf("complete fetching data from root\n");
+	return 0;
 }
-void DataGroup::buildMatrix(){ //local but should involked in each processes
-	int nonZeroDiagnal = 5, noneZeroOffDiagnal = 5;
-	double* 
+int DataGroup::buildMatrix(){ //local but should involked in each processes
+	PetscInt linecounter = 0;
+	int ibegin=0, iend=0;
+	PetscInt iInsert=0;
+	PetscInt* jInsert = new PetscInt[MAX_ROW]; // it is necesasry to prescribe the max index of a row
+	PetscScalar* vInsert = new PetscScalar[MAX_ROW];
+
+	ierr = MatGetOwnershipRange(Au,&ibegin,&iend);CHKERRQ(ierr);//get range in global index
+	printf("process%d range from %d ---> %d\n",comRank,ibegin,iend);
+	for(int i=0;i!=nLocal;++i){
+		linecounter = 0;
+		for(int j=0;j!=MAX_ROW;++j){
+			if(Aposi[i][j]==-1) break;
+			jInsert[j] = Aposi[i][j]; //j is always global range!
+			vInsert[j] = Avals[i][j];
+			linecounter++;
+		}
+		iInsert = ibegin + i;
+		ierr = MatSetValues(Au,1,&iInsert,linecounter,jInsert,vInsert,INSERT_VALUES);CHKERRQ(ierr);
+	}
+
+	ierr = MatAssemblyBegin(Au,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
+	/* 	do some extra work here
+	 *
+	 *
+	 *
+	 */
+	ierr = MatAssemblyEnd(Au,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
+
+	printf("process%d complete buildMatrix\n",comRank);
+
+	delete jInsert;
+	delete vInsert;
+	return 0;
 }
 
 

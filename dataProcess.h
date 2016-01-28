@@ -51,18 +51,22 @@ struct DataGroup{
 		mpiErr = MPI_Comm_rank(comm,&comRank);CHECK(mpiErr)
 		mpiErr = MPI_Comm_size(comm,&comSize);CHECK(mpiErr)
 	}
-	void init(RootProcess& root); // communicate to get local size on each processes , collective call
-	void deinit(){ // a normal deconstructor seems not working in MPI
+	int init(RootProcess& root); // communicate to get local size on each processes , collective call
+	int deinit(){ // a normal deconstructor seems not working in MPI
 		printf("datagroup NO. %d died\n",comRank);
-		ierr = VecDestroy(&u);PCHECK(ierr);
+		ierr = VecDestroy(&u);CHKERRQ(ierr);
 		delete []Avals;
 		delete []Aposi;
 		delete []gridList;
+		Avals=NULL;
+		gridList=NULL;
+		Aposi=NULL;
+		return 0;
 	}
 	~DataGroup(){
 	}
-	void fetchDataFrom(RootProcess& root);
-	void buildMatrix();
+	int fetchDataFrom(RootProcess& root);
+	int buildMatrix();
 	int errorCounter;
 	void throwError(const std::string& msg){ // only check error when SHOULD_CHECK_MPI_ERROR is defined
 		char temp[256];
@@ -82,7 +86,6 @@ class RootProcess{
 public:
 	int rank; //rank of the root;
 	/*******************this part should only own by ROOT*****/ 
-	std::ifstream* infileptr;
 	int rootNGlobal;
 	double* rootuBuffer;
 	double* rootABuffer;
@@ -91,7 +94,6 @@ public:
 	/*********************************************************/
 	RootProcess(int r):
 		rank(r),
-		infileptr(NULL),
 		rootNGlobal(-1),
 		rootuBuffer(NULL), //NULL if not root
 		rootABuffer(NULL),
@@ -99,21 +101,26 @@ public:
 		rootgridList(NULL)
 	{}
 	~RootProcess(){
-		if(rootuBuffer!=NULL)
-			delete rootuBuffer;
-		if(rootABuffer!=NULL)
-			delete []rootABuffer;
-		if(rootAPosiBuffer!=NULL)
-			delete []rootAPosiBuffer;
-
+		clean();
+	}
+	void clean(){
+		rank = -1;
+		rootNGlobal = -1;
+		delete rootuBuffer;
+		delete []rootABuffer;
+		delete []rootAPosiBuffer;
+		delete rootgridList;
+		rootuBuffer=rootABuffer=NULL;
+		rootAPosiBuffer = NULL;
+		rootgridList=NULL;
+		
 	}
 	void read(){ //should involk only in root process
 		printf("start reading in root\n");
 		char ctemp[256];
 		int itemp=0;
 		int maxRow = 0;
-		infileptr = new std::ifstream("Au.dat");
-		std::ifstream& infile = *infileptr;	
+		std::ifstream infile("Au.dat");
 		infile>>ctemp>>rootNGlobal;
 		infile>>ctemp>>itemp;
 		infile>>ctemp>>maxRow;
@@ -142,7 +149,7 @@ public:
 			infile>>ctemp>>bVal>>dump;
 			rootuBuffer[i] = bVal;
 		}
-		infileptr->close();
+		infile.close();
 		printf("complete reading in root\n");
 		printf("now the input array is \n");
 	}
