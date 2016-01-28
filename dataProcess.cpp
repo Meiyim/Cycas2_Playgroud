@@ -3,6 +3,9 @@ using namespace std;
 
 
 int DataGroup::init(RootProcess& root){ //collcetive
+
+	MPI_Barrier(comm);
+
 	printf("process %d initing\n",comRank);
 	nProcess = comSize;
 	if(comRank==root.rank) // in root processes
@@ -61,6 +64,7 @@ int DataGroup::init(RootProcess& root){ //collcetive
 	return 0;
 }
 
+
 int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	int sourceRank=root.rank;
 
@@ -69,8 +73,12 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	int* offsets = new int[nProcess];
 	double* localArray = NULL; 
 	int* localArray2 = NULL;
+
+	MPI_Barrier(comm);
+
 	printf("start fetching data from root\n");
 	offsets[0] = 0;
+	sourceCount[0] = gridList[0];
  	//*************************fetching vecotr U***************************	
 	for(int i=1;i!=nProcess;++i){
 		sourceCount[i] = gridList[i];
@@ -81,15 +89,17 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 
 	mpiErr = MPI_Scatterv(root.rootuBuffer,sourceCount,offsets,MPI_DOUBLE,
 			localArray,destCount,MPI_DOUBLE,sourceRank,comm); CHECK(mpiErr)
+	/*
 	if(comRank==root.rank)
 	for(int i=0;i!=nLocal;++i)	
 		localArray[i] = root.rootuBuffer[i];
-	
+	*/	
 
 	ierr = VecRestoreArray(bu,&localArray);CHKERRQ(mpiErr);
 
  	//*************************fetching Matrix A***************************	
 	
+	sourceCount[0] = gridList[0] * MAX_ROW;
 	for(int i=1;i!=nProcess;++i){
 		sourceCount[i] = gridList[i] * MAX_ROW; // preassume 5 nEntries
 		offsets[i] = offsets[i-1] + sourceCount[i];
@@ -104,14 +114,15 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 
 	mpiErr = MPI_Scatterv(root.rootAPosiBuffer,sourceCount,offsets,MPI_INT,
 			localArray2,destCount,MPI_INT,sourceRank,comm); CHECK(mpiErr)
-	
-	if(comRank==root.rank){ //scatterv wont scatter to self! need to explicitly copy to self :(
+	/*	
+	if(comRank==root.rank){ 
 		for(int i=0;i!=nLocal;++i)
 			for(int j=0;j!=MAX_ROW;++j){
 			Aposi[i][j] = root.rootAPosiBuffer[i*MAX_ROW+j]; // root range from 0~nLocal
 			Avals[i][j] = root.rootABuffer[i*MAX_ROW+j];
 		}
 	}	
+	*/
 
 
 	delete offsets;
@@ -121,6 +132,46 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 }
 
 
+int DataGroup::pushDataTo(RootProcess& root){ //collective reverse progress of the fetch function
+	double* sendbuf = NULL;
+	int sendcount = 0;
+
+	double* recvbuf = NULL;
+	int* recvcount = NULL; // significant only at root
+	int* offsets = NULL;    // significant only at root
+	
+	MPI_Barrier(comm);
+	printf("begin pushing data to root\n");
+	if(comRank==root.rank)
+		root.allocate();
+	recvcount = new int[nProcess];
+	offsets = new int[nProcess];
+	offsets[0] = 0;
+ 	//*************************pushing vecotr U***************************	
+	recvcount[0] = gridList[0];
+	for(int i=1;i!=nProcess;++i){
+		recvcount[i] = gridList[i];
+		offsets[i] = offsets[i-1] + recvcount[i];
+	}
+	sendcount = nLocal;
+	recvbuf = root.rootuBuffer;
+	ierr = VecGetArray(u,&sendbuf);CHKERRQ(ierr);
+	mpiErr = MPI_Gatherv( sendbuf,sendcount,MPI_DOUBLE,
+			      recvbuf,recvcount,offsets,MPI_DOUBLE,
+			      root.rank,comm
+			    );CHECK(mpiErr)
+
+	ierr = VecRestoreArray(u,&sendbuf);CHKERRQ(ierr);
+
+
+	delete recvcount;
+	delete offsets;
+	printf("complete pushing data to root\n");
+
+	return 0;
+
+}
+
 int DataGroup::buildMatrix(){ //local but should involked in each processes
 	PetscInt linecounter = 0;
 	int ibegin=0, iend=0;
@@ -129,7 +180,6 @@ int DataGroup::buildMatrix(){ //local but should involked in each processes
 	PetscScalar* vInsert = new PetscScalar[MAX_ROW];
 
 	ierr = MatGetOwnershipRange(Au,&ibegin,&iend);CHKERRQ(ierr);//get range in global index
-	printf("process%d range from %d ---> %d\n",comRank,ibegin,iend);
 	for(int i=0;i!=nLocal;++i){ //this loop should be optimized with local parallel, tbb , openMP, etc.
 		linecounter = 0;
 		for(int j=0;j!=MAX_ROW;++j){
@@ -181,7 +231,7 @@ int DataGroup::solveGMRES(double tol, int maxIter){
 	 * 	SOLVE!
 	 ***************************************/
 	KSPSolve(ksp,bu,u);
-	KSPView(ksp,PETSC_VIEWER_STDOUT_WORLD);
+	//KSPView(ksp,PETSC_VIEWER_STDOUT_WORLD);
 	KSPGetConvergedReason(ksp,&reason);
 	if(reason<0){
 		printf("seems the KSP didnt converge :(\n");

@@ -73,6 +73,7 @@ struct DataGroup{
 	~DataGroup(){
 	}
 	int fetchDataFrom(RootProcess& root);
+	int pushDataTo(RootProcess& root);
 	int buildMatrix();
 	int solveGMRES(double tol,int maxIter); //return 0 if good solve, retrun 1 if not converge
 	int errorCounter;
@@ -111,17 +112,15 @@ public:
 	~RootProcess(){
 		clean();
 	}
+	void allocate(){ //prepare for gather;
+		rootuBuffer = new double[rootNGlobal];
+	}
 	void clean(){
-		rank = -1;
-		rootNGlobal = -1;
 		delete rootuBuffer;
 		delete []rootABuffer;
 		delete []rootAPosiBuffer;
-		delete rootgridList;
 		rootuBuffer=rootABuffer=NULL;
 		rootAPosiBuffer = NULL;
-		rootgridList=NULL;
-		
 	}
 	/***************************************************
 	 * 	 this funciton should involk only in root process
@@ -136,7 +135,7 @@ public:
 		infile>>ctemp>>itemp;
 		infile>>ctemp>>maxRow;
 
-		rootuBuffer = new double[rootNGlobal];
+		allocate();
 		rootABuffer = new double[rootNGlobal*MAX_ROW];
 		rootAPosiBuffer = new int[rootNGlobal*MAX_ROW];
 
@@ -180,6 +179,20 @@ public:
 		rootgridList->back() = rootNGlobal - counter;
 		/**************************************************/
 		printf("complete partitioning in root \n");
+	}
+
+	/***************************************************
+	 * 	 writing result to root
+	 * *************************************************/
+	void write(){
+		printf("writing....");
+		std::ofstream outfile("result.dat");
+		char temp[256];
+		for(int i=0;i!=rootNGlobal;++i){
+			sprintf(temp,"%15d\t%15e\n",i+1,rootuBuffer[i]);
+			outfile<<temp;
+		}
+		outfile.close();
 	}
 };
 #endif
