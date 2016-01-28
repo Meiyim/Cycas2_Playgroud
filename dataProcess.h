@@ -3,8 +3,7 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
-#include <petscvec.h>
-#include <petscmat.h>
+#include <petscksp.h>
 #ifndef _DATA_PROCESS_H_
 #define _DATA_PROCESS_H_
 
@@ -26,9 +25,14 @@
 class RootProcess;
 struct DataGroup{ 
 	Vec u;
+	Vec bu;
 	Mat Au;
 	PetscErrorCode ierr;
 	MPI_Comm comm;
+	/***********KSP CONTEXT***************/
+	KSP ksp;	
+	PC pc;
+	/*******************************/
 	int mpiErr;
 	int comRank;
 	int comSize;
@@ -55,6 +59,9 @@ struct DataGroup{
 	int deinit(){ // a normal deconstructor seems not working in MPI
 		printf("datagroup NO. %d died\n",comRank);
 		ierr = VecDestroy(&u);CHKERRQ(ierr);
+		ierr = VecDestroy(&bu);CHKERRQ(ierr);
+		ierr = MatDestroy(&Au);CHKERRQ(ierr);
+		ierr = KSPDestroy(&ksp);CHKERRQ(ierr);
 		delete []Avals;
 		delete []Aposi;
 		delete []gridList;
@@ -67,6 +74,7 @@ struct DataGroup{
 	}
 	int fetchDataFrom(RootProcess& root);
 	int buildMatrix();
+	int solveGMRES(double tol,int maxIter); //return 0 if good solve, retrun 1 if not converge
 	int errorCounter;
 	void throwError(const std::string& msg){ // only check error when SHOULD_CHECK_MPI_ERROR is defined
 		char temp[256];
@@ -115,7 +123,10 @@ public:
 		rootgridList=NULL;
 		
 	}
-	void read(){ //should involk only in root process
+	/***************************************************
+	 * 	 this funciton should involk only in root process
+	 * *************************************************/
+	void read(){ 
 		printf("start reading in root\n");
 		char ctemp[256];
 		int itemp=0;
@@ -153,6 +164,9 @@ public:
 		printf("complete reading in root\n");
 		printf("now the input array is \n");
 	}
+	/***************************************************
+	 * 	 this funciton should involk only in root process
+	 * *************************************************/
 	void partition(int N){
 		printf("start partitioning in root \n");
 		/*****************DATA PARTITION*******************/

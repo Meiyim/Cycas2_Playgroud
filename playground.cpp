@@ -40,9 +40,6 @@ int main(int argc,char **args) try
 
   dataGroup->init(root); // m,n is decided by root
   getchar();
-  ierr = VecSet(dataGroup->u,0.0);CHKERRQ(ierr);
-  VecAssemblyBegin(dataGroup->u);
-  VecAssemblyEnd(dataGroup->u);
   dataGroup->fetchDataFrom(root);
   getchar();
   MPI_Barrier(PETSC_COMM_WORLD);
@@ -61,9 +58,8 @@ int main(int argc,char **args) try
   dataGroup->buildMatrix();
   printf("process: %d waiting at barrier in main\n",dataGroup->comRank);
   getchar();
-  MPI_Barrier(PETSC_COMM_WORLD);
   root.clean(); //free space of root obj
-
+  dataGroup->solveGMRES(1.e-6,2000);
   /*-------------------------------
    *	all processors works from here 
    *-------------------------------*/
@@ -97,9 +93,10 @@ int main(int argc,char **args) try
   /*--------------------------------
    * view the vector 
    *-------------------------------*/
-  //ierr = VecView(dataGroup->u,PETSC_VIEWER_DRAW_WORLD);CHKERRQ(ierr); //this vector is too big to view!
+
+  //ierr = VecView(dataGroup->bu,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
   
-  ierr = MatView(dataGroup->Au,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
+  //ierr = MatView(dataGroup->Au,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
   
 
   

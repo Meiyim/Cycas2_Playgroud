@@ -28,13 +28,25 @@ int DataGroup::init(RootProcess& root){ //collcetive
 	nLocal = gridList[comRank];
 	printf("\n");
 	getchar();
-	ierr = VecCreateMPI(comm,nLocal,nGlobal,&u);CHKERRQ(ierr); //init PETSC vec
-	ierr = MatCreate(comm,&Au);PCHECK(ierr);CHKERRQ(ierr);     //init PETSC mat
+	//init PETSC vec
+	ierr = VecCreateMPI(comm,nLocal,nGlobal,&u);CHKERRQ(ierr); 
+	ierr = VecDuplicate(u,&bu);CHKERRQ(ierr);
+
+	ierr = VecSet(bu,0.0);CHKERRQ(ierr);
+	ierr = VecSet(u,1.0);CHKERRQ(ierr);
+	ierr = VecAssemblyBegin(u);CHKERRQ(ierr);
+	ierr = VecAssemblyEnd(u);CHKERRQ(ierr);
+	ierr = VecAssemblyBegin(bu);CHKERRQ(ierr);
+	ierr = VecAssemblyEnd(bu);CHKERRQ(ierr);
+
+	//init PETSC mat
+	ierr = MatCreate(comm,&Au);PCHECK(ierr);CHKERRQ(ierr);     
 	ierr = MatSetSizes(Au,nLocal,nLocal,nGlobal,nGlobal);CHKERRQ(ierr);
 	ierr = MatSetType(Au,MATAIJ);CHKERRQ(ierr);
 	ierr = MatMPIAIJSetPreallocation(Au,MAX_ROW,NULL,MAX_ROW,NULL);CHKERRQ(ierr);	
 
-
+	//init KSP context
+	ierr = KSPCreate(comm,&ksp);
 
 	printf("datagrounp NO. %d init complete, dimension %d x %d = %d\n",comRank,nLocal,nProcess,nGlobal);
 	//-----test purpose
@@ -65,16 +77,16 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 		offsets[i] = offsets[i-1] + sourceCount[i];
 	}
 	destCount = nLocal;
-	ierr = VecGetArray(u,&localArray);CHKERRQ(mpiErr); //fetch raw pointer of PetscVector;
+	ierr = VecGetArray(bu,&localArray);CHKERRQ(mpiErr); //fetch raw pointer of PetscVector;
 
 	mpiErr = MPI_Scatterv(root.rootuBuffer,sourceCount,offsets,MPI_DOUBLE,
 			localArray,destCount,MPI_DOUBLE,sourceRank,comm); CHECK(mpiErr)
-	/*
+	if(comRank==root.rank)
 	for(int i=0;i!=nLocal;++i)	
-		printf("array for process %d: %f\n",comRank,localArray[i]);
-	*/
+		localArray[i] = root.rootuBuffer[i];
+	
 
-	ierr = VecRestoreArray(u,&localArray);CHKERRQ(mpiErr);
+	ierr = VecRestoreArray(bu,&localArray);CHKERRQ(mpiErr);
 
  	//*************************fetching Matrix A***************************	
 	
@@ -107,6 +119,8 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	printf("complete fetching data from root\n");
 	return 0;
 }
+
+
 int DataGroup::buildMatrix(){ //local but should involked in each processes
 	PetscInt linecounter = 0;
 	int ibegin=0, iend=0;
@@ -116,7 +130,7 @@ int DataGroup::buildMatrix(){ //local but should involked in each processes
 
 	ierr = MatGetOwnershipRange(Au,&ibegin,&iend);CHKERRQ(ierr);//get range in global index
 	printf("process%d range from %d ---> %d\n",comRank,ibegin,iend);
-	for(int i=0;i!=nLocal;++i){
+	for(int i=0;i!=nLocal;++i){ //this loop should be optimized with local parallel, tbb , openMP, etc.
 		linecounter = 0;
 		for(int j=0;j!=MAX_ROW;++j){
 			if(Aposi[i][j]==-1) break;
@@ -129,12 +143,7 @@ int DataGroup::buildMatrix(){ //local but should involked in each processes
 	}
 
 	ierr = MatAssemblyBegin(Au,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
-	/* 	do some extra work here
-	 *
-	 *
-	 *
-	 */
-	ierr = MatAssemblyEnd(Au,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
+	//!!!!!!!!!!!!!!!!!!!!!!END ASSEMBLY IS AT SOLVE GMRES!!!!!!!!!!!!!//
 
 	printf("process%d complete buildMatrix\n",comRank);
 
@@ -143,5 +152,52 @@ int DataGroup::buildMatrix(){ //local but should involked in each processes
 	return 0;
 }
 
+
+int DataGroup::solveGMRES(double tol, int maxIter){
+	KSPConvergedReason reason;
+	int iters;
+	ierr = MatAssemblyEnd(Au,MAT_FINAL_ASSEMBLY);CHKERRQ(ierr);
+	MPI_Barrier(comm);
+	
+	KSPSetOperators(ksp,Au,Au);
+	KSPSetType(ksp,KSPGMRES);
+	KSPSetInitialGuessNonzero(ksp,PETSC_TRUE);
+
+	/***************************************
+	 *      SET  TOLERENCE
+	 ***************************************/
+	KSPSetTolerances(ksp,tol,PETSC_DEFAULT,PETSC_DEFAULT,maxIter);	
+
+
+	/***************************************
+	 * 	ILU preconditioner:
+	 ***************************************/
+	//KSPGetPC(ksp,&pc);
+	KSPSetFromOptions(ksp);
+	KSPSetUp(ksp); //the precondition is done at this step
+
+
+	/***************************************
+	 * 	SOLVE!
+	 ***************************************/
+	KSPSolve(ksp,bu,u);
+	KSPView(ksp,PETSC_VIEWER_STDOUT_WORLD);
+	KSPGetConvergedReason(ksp,&reason);
+	if(reason<0){
+		printf("seems the KSP didnt converge :(\n");
+		return 1;
+	}else if(reason ==0){
+		printf("why is this program still running?\n");
+	}else{
+		KSPGetIterationNumber(ksp,&iters);
+		printf("KSP converged in %d step! :)\n",iters);
+		return 0;
+	}
+	
+
+
+
+	return 0;	
+}
 
 
