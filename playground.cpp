@@ -13,7 +13,7 @@ int main(int argc,char **args) try
 {
   //Vec            u;
   //Mat            A;
-  PetscInt       m=8,n=4;
+  PetscInt      n=4;
   PetscErrorCode ierr;
   //PetscScalar    v;
 
@@ -29,9 +29,8 @@ int main(int argc,char **args) try
 
   /******************** ROOT ONLY ****************************************/
   if(dataGroup->comRank == 0){
-	  root.rootuBuffer = new double[m*n];
-	  root.read();
-	  root.partition(n);//n must be the number of processes
+	  root.read(dataGroup);
+	  root.partition(n,dataGroup);//n must be the number of processes
 	  getchar();
   }
   /***********************************************************************/
@@ -63,7 +62,7 @@ int main(int argc,char **args) try
    dataGroup->pushDataTo(root); //sent result U back to root, 
 
   if(dataGroup->comRank==0)
-  	root.write();
+  	root.write(dataGroup);
   
   /*-------------------------------
    *	all processors works from here 
@@ -100,7 +99,7 @@ int main(int argc,char **args) try
    *-------------------------------*/
 
   //ierr = VecView(dataGroup->u,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
-  //ierr = MatView(dataGroup->Au,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
+  ierr = MatView(dataGroup->Au,PETSC_VIEWER_STDOUT_WORLD);CHKERRQ(ierr); //this vector is too big to view!
   
 
   

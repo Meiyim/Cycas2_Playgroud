@@ -86,6 +86,8 @@ struct DataGroup{
 		printf("*****************************END ERROR***************************************");
 		throw std::runtime_error(temp);
 	}
+private:
+	int pushVectorToRoot(const Vec& petscVec, double* rootbuffer,int rootRank);
 
 };
 /******************************************************
@@ -97,6 +99,7 @@ public:
 	/*******************this part should only own by ROOT*****/ 
 	int rootNGlobal;
 	double* rootuBuffer;
+	double* rootbuBuffer;
 	double* rootABuffer;
 	int* rootAPosiBuffer;
 	std::vector<int>* rootgridList;
@@ -105,6 +108,7 @@ public:
 		rank(r),
 		rootNGlobal(-1),
 		rootuBuffer(NULL), //NULL if not root
+		rootbuBuffer(NULL),
 		rootABuffer(NULL),
 		rootAPosiBuffer(NULL),
 		rootgridList(NULL)
@@ -112,11 +116,14 @@ public:
 	~RootProcess(){
 		clean();
 	}
-	void allocate(){ //prepare for gather;
+	void allocate(DataGroup* dg){ //prepare for gather;
+		if(dg->comRank!=rank) return; //only in root
 		rootuBuffer = new double[rootNGlobal];
+		rootbuBuffer = new double[rootNGlobal];
 	}
 	void clean(){
 		delete rootuBuffer;
+		delete rootbuBuffer;
 		delete []rootABuffer;
 		delete []rootAPosiBuffer;
 		rootuBuffer=rootABuffer=NULL;
@@ -125,7 +132,8 @@ public:
 	/***************************************************
 	 * 	 this funciton should involk only in root process
 	 * *************************************************/
-	void read(){ 
+	void read(DataGroup* dg){ 
+		if(dg->comRank!=rank) return; //only in root
 		printf("start reading in root\n");
 		char ctemp[256];
 		int itemp=0;
@@ -135,7 +143,7 @@ public:
 		infile>>ctemp>>itemp;
 		infile>>ctemp>>maxRow;
 
-		allocate();
+		allocate(dg);
 		rootABuffer = new double[rootNGlobal*MAX_ROW];
 		rootAPosiBuffer = new int[rootNGlobal*MAX_ROW];
 
@@ -166,7 +174,8 @@ public:
 	/***************************************************
 	 * 	 this funciton should involk only in root process
 	 * *************************************************/
-	void partition(int N){
+	void partition(int N,DataGroup* dg){
+		if(dg->comRank!=rank) return;//only in root
 		printf("start partitioning in root \n");
 		/*****************DATA PARTITION*******************/
 		rootgridList = new std::vector<int>(N,0);
@@ -184,12 +193,13 @@ public:
 	/***************************************************
 	 * 	 writing result to root
 	 * *************************************************/
-	void write(){
+	void write(DataGroup* dg){
+		if(dg->comRank!=rank) return; //only in root
 		printf("writing....");
 		std::ofstream outfile("result.dat");
 		char temp[256];
 		for(int i=0;i!=rootNGlobal;++i){
-			sprintf(temp,"%15d\t%15e\n",i+1,rootuBuffer[i]);
+			sprintf(temp,"%15d\tx:%15e\tb:%15e\n",i+1,rootuBuffer[i],rootbuBuffer[i]);
 			outfile<<temp;
 		}
 		outfile.close();

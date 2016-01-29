@@ -131,8 +131,22 @@ int DataGroup::fetchDataFrom(RootProcess& root){ //collective
 	return 0;
 }
 
+int DataGroup::pushDataTo(RootProcess& root){//collective reverse progress of the fetch function
+	MPI_Barrier(comm);
+	printf("begin pushing data to root\n");
 
-int DataGroup::pushDataTo(RootProcess& root){ //collective reverse progress of the fetch function
+	root.allocate(this);
+	pushVectorToRoot(u,root.rootuBuffer,root.rank);
+	pushVectorToRoot(bu,root.rootbuBuffer,root.rank);
+
+	printf("complete pushing data to root\n");
+	return 0;
+}
+
+//********last 2 parameter only significant at root, sending PETSC vector only!***********
+//			collective call
+//************************************************************************
+int DataGroup::pushVectorToRoot(const Vec& petscVec,double* rootBuffer,int rootRank){  
 	double* sendbuf = NULL;
 	int sendcount = 0;
 
@@ -140,10 +154,6 @@ int DataGroup::pushDataTo(RootProcess& root){ //collective reverse progress of t
 	int* recvcount = NULL; // significant only at root
 	int* offsets = NULL;    // significant only at root
 	
-	MPI_Barrier(comm);
-	printf("begin pushing data to root\n");
-	if(comRank==root.rank)
-		root.allocate();
 	recvcount = new int[nProcess];
 	offsets = new int[nProcess];
 	offsets[0] = 0;
@@ -154,19 +164,18 @@ int DataGroup::pushDataTo(RootProcess& root){ //collective reverse progress of t
 		offsets[i] = offsets[i-1] + recvcount[i];
 	}
 	sendcount = nLocal;
-	recvbuf = root.rootuBuffer;
-	ierr = VecGetArray(u,&sendbuf);CHKERRQ(ierr);
+	recvbuf = rootBuffer;
+	ierr = VecGetArray(petscVec,&sendbuf);CHKERRQ(ierr);
 	mpiErr = MPI_Gatherv( sendbuf,sendcount,MPI_DOUBLE,
 			      recvbuf,recvcount,offsets,MPI_DOUBLE,
-			      root.rank,comm
+			      rootRank,comm
 			    );CHECK(mpiErr)
 
-	ierr = VecRestoreArray(u,&sendbuf);CHKERRQ(ierr);
+	ierr = VecRestoreArray(petscVec,&sendbuf);CHKERRQ(ierr);
 
 
 	delete recvcount;
 	delete offsets;
-	printf("complete pushing data to root\n");
 
 	return 0;
 
